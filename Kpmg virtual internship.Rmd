@@ -1,0 +1,266 @@
+---
+title: "Machine learning project-KPMG"
+author: "MAINA"
+date: "2023-09-12"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+ Sprocket Central Pty Ltd is a medium size bikes and accessories organisation. The organisation needs helps with customers and transactions data in effectively analyzing it to help optimize its marketing strategy. The Sprocket Central Pty Ltd believes if their data is correctly analyzed, it would reveal useful customer insights which could help optimize targeted resource allocation for targeted marketing. This will improve the performance by targeting high value customers. 
+  The organisation provided data sets they felt like they needed to be analyzed and two of the data sets were used in this project. These are;
+  Customer demographics data set 
+  Transactions data set
+  
+These project involves the following procedures; 
+  1. Data collection and importing
+  2. Data quality assessment
+  3. Data exploration
+  4. Model development
+
+```{r}
+#Working directory
+setwd("C:\\Users\\MAINAKIGEN\\Desktop\\Felix Mutai")
+#Loading libraries
+library(readxl)
+library(dplyr)
+library(rio)
+library(visdat)
+library(naniar)
+library(ggplot2)
+library(rfm)
+library(caret)
+#Importing data sets
+Demographics<-read_excel("Customer demographics.xlsx")
+Transactions<-read_excel("Transaction data.xlsx")
+```
+  
+  
+**Data quality assessment**
+```{r}
+##Customer demographics data set
+###Re-coding Gender
+Demographics$gender<-recode(Demographics$gender, "F"="Female","Femal"="Female","M"="Male")
+###Re-coding Job_industry_category
+Demographics<-Demographics %>% replace_with_na(replace = list(job_industry_category="n/a"))
+##Converting character variables to factor variables
+Demographics<-Demographics %>% mutate_at(c("gender",
+              "job_title",
+              "job_industry_category",
+              "wealth_segment",
+              "deceased_indicator",
+              "owns_car"),as.factor)
+
+###Converting character DOB to date
+Demographics$DOB<-as.numeric(Demographics$DOB)
+Demographics$DOB<-as.Date(Demographics$DOB,origin="1899-12-30")
+###Dropping less important variable
+Demographics= subset(Demographics, select = -c(default,deceased_indicator) )
+###Visualizing missing values
+vis_miss(Demographics)
+###Droping missing values
+Demographics<-Demographics %>% filter(!is.na(last_name),
+                                      !is.na(DOB),
+                                      !is.na(job_title),
+                                      !is.na(job_industry_category),
+                                      !is.na(tenure))
+                                                            
+
+```
+
+Several data cleaning procedures were conducted to clean the customer demographics data set. Inconsistencies in gender and job industry category variables were removed. Character variables that can be used for modelling were changed to factor variables.The date variable was converted from character to date datatype. Default and deceased indicator variables were not important in the analysis and thus were removed. Missing values were visualized as shown above and the observations with missing values were omitted from the data set. Figure 1 above visualizes the columns with missing values. 
+
+
+```{r}
+##Transactions data set
+###converting character columns to factor 
+Transactions<-Transactions %>% 
+  mutate_at(c("order_status",
+              "brand",
+              "product_line",
+              "product_class",
+              "product_size"),as.factor)
+###Converting "product_first_sold_date" to date
+Transactions$product_first_sold_date <- as.Date(Transactions$product_first_sold_date,origin="1899-12-30")
+###Visualizing missing values
+vis_miss(Transactions)
+Transactions %>% arrange(product_first_sold_date) %>% vis_miss()
+###Dropping missing values
+Transactions<-Transactions %>% filter(!is.na(online_order),
+                                                !is.na(brand))
+```
+
+
+Some data cleaning were also performed on data transaction data set. Character variables necessary for modelling were converted to factor variables. Missing values were only witnessed in brand and online order variables as shown in figure 2 above. The observations with the missing values were omitted. 
+
+```{r}
+##Combining the datasets
+Combined<-merge(x=Demographics,y=Transactions,by="customer_id",all.x = TRUE)
+##Dropping missing values
+Combined<-na.omit(Combined)
+#Data transformation
+##Calculating age
+Combined<-Combined %>% mutate(age=as.numeric(difftime(Sys.Date(),DOB,units="weeks"))/52.25)
+##Categorizing age
+Age.cat <- NA # need to initialize variable
+Combined <- within(Combined, {   
+  Age.cat[age < 18] <- "Less than 18"
+  Age.cat[age >= 18 & age < 35] <- "18-34"
+  Age.cat[age >= 35 & age < 50] <- "35-49"
+  Age.cat[age>=50]="Above 50"
+} )
+
+##Calculating profit
+Combined<-Combined %>% mutate(profit=list_price-standard_cost)
+```
+
+The two data sets were merged to form a single data set with 13640 observations and 26 variables.Further data transformation was performed on the combined data set. The age of the customers was calculated from the date of birth. The age was further categorized into age groups. The profit was also calculated from list price and standard cost.  
+
+**DATA EXPLORATION**
+## Summary statistics 
+```{r pressure}
+##Summary statistics and Data visualization
+summary(Combined)
+```
+
+Table 1 above shows the summary statistics variables in the dataset 
+
+##Data Visualization
+```{r}
+##Age distribution
+ggplot(Combined, aes(x = age)) +
+geom_histogram(fill = "cornflowerblue",
+color = "white") +
+labs(title="Age distribution of the customers",
+x = "Age")
+```
+The histogram in figure 3 above displays a normal distribution.This implies that the age of the customers are normally distributed. None of the customers was less than 20 years. There were many customers between the age of 40 t 50. 
+
+```{r}
+##Profit from by related sales by age
+ggplot(Combined,
+       aes(x = Age.cat,
+           y = profit)) +
+  geom_bar(stat = "identity",fill="cornflowerblue")+
+  labs(title = "Profit by age")
+```
+
+Bar graph in figure 4 further displays the distribution of customers. Most of the customers were between 35 to 49 years. 
+```{r}
+##Bike related purchases by job industry
+ggplot(Combined,
+       aes(x = job_industry_category,
+           y = past_3_years_bike_related_purchases)) +
+  geom_bar(stat = "identity",fill="blue")+coord_flip()+
+  labs(title = "Bike related purchases by job industry")
+```
+
+Figure 5 above is a bar chart showing the distribution of purchases for the past 3 years by industry category. It shows that most purchases were done by those in the manufacturing industry
+```{r}
+##Profit by wealth segment
+ggplot(Combined,
+       aes(x = wealth_segment,
+           y =profit)) +
+  geom_bar(stat = "identity",fill="skyblue")+
+  labs(title = "Profit by wealth segment")
+```
+
+ Figure  shows the distribution by wealth segment. Mass customers made the most purchases in the past 3 years. 
+
+
+```{r}
+##Relationship between age and tenure
+ggplot(data = Combined,
+mapping = aes(x = age, y = tenure)) +
+geom_point(color = "cornflowerblue",
+alpha = .7,
+size = 3)
+```
+
+Scatter plot in figure 7 above was used to determine the relationship between the age of the customers and their tenure. There is a positive linear relationship between the two variables. This implies that older customers have longer tenure in the organisation than the younger customers. 
+
+
+##Model development
+```{r}
+##RFM analysis
+analysis_date <- as.POSIXct("2017-12-30",tz="UTC")
+rfm_result <- rfm_table_order(Combined, customer_id, transaction_date, profit, analysis_date)
+rfm_result
+rfm_bar_chart(rfm_result)
+
+##Labeling customer segments
+segment_names <- c("Champions", "Potential Loyalist", "Loyal Customers","Promising",
+                   "New Customers", "Can't Lose Them",
+                   "At Risk", "Need Attention", "About To Sleep", "Lost")
+
+##Boundaries
+recency_lower <-   c(5, 3, 2, 3, 4, 1, 1, 1, 2, 1)
+recency_upper <-   c(5, 5, 4, 4, 5, 2, 2, 3, 3, 1)
+frequency_lower <- c(5, 3, 2, 1, 1, 3, 2, 3, 1, 1)
+frequency_upper <- c(5, 5, 4, 3, 3, 4, 5, 5, 3, 5)
+monetary_lower <-  c(5, 2, 2, 3, 1, 4, 4, 3, 1, 1)
+monetary_upper <-  c(5, 5, 4, 5, 5, 5, 5, 5, 4, 5)
+
+##Customer segmentation
+segments<-rfm_segment(rfm_result,
+                      segment_names,
+                      recency_lower,
+                      recency_upper,
+                      frequency_lower,
+                      frequency_upper,
+                      monetary_lower,monetary_upper)
+segment_df<-as.data.frame(segments)
+##Visualizing rfm analysis
+segment_df %>%
+  count(segment) %>%
+  arrange(desc(n)) %>%
+  rename(Segment = segment, Count = n)
+```
+
+RFM analysis was used to classify customers according to their value to organisation. This technique was used to place the customers into 10 categories based on their recency, frequency and monetary value in the organisation.Table 1 above shows that most customers in the organisation were potential loyalist (N=754). Only 34 of the customers needed more attention. This table helps the organisation decide who they can spend more resources in their marketing.  
+
+
+
+```{r}
+##Regression analysis
+train_index<-createDataPartition(Combined$profit, times=1, p=.8, list=FALSE)
+##Training set
+Train<-Combined[train_index,]
+##Test set
+Test<-Combined[-train_index,]
+dim(Train)
+dim(Test)
+```
+
+The training set had 10913 observations while the test set had 2727 observations. 
+
+```{r}
+##Regression Model
+Model<-lm(profit~gender+job_industry_category+wealth_segment+brand+product_size+age,data = Train)
+summary(Model)
+```
+
+Linear regression model was used to predict the profit of the company based on the customers demographics and other transaction details. The model shows that only product size and brand were the only variables with a significant effect on profit. The R squared value shows that only 31% of the variation in profit were explained by the predictor variables. 
+
+##Making predictions from the model
+```{r}
+prediction<-predict(Model,Test)
+Actual_prediction<-as.data.frame(cbind(Test$profit,prediction))
+colnames(Actual_prediction)<-c("Actual","Prediction")
+head(Actual_prediction)
+```
+
+Table above shows the first  predictions made by the model. 
+
+##Model Evaluation
+```{r}
+mse<-mean((prediction-Test$profit)^2)
+mse
+rmse<-sqrt(mse)
+rmse
+```
+Root mean squared (RMSE) was used to evaluate the model. The RMSE value (415.5319) was less than the mean of the dependent variable hence it can make accurate predictions. However, the model performance based on RMSE and R squared is not good and hence it needs more tuning. 
